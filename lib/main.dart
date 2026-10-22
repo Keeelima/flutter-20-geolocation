@@ -1,3 +1,8 @@
+import 'dart:async';
+
+import 'package:geolocator/geolocator.dart';
+import 'package:flutter_device_compass/flutter_device_compass.dart';
+
 import 'package:flutter/material.dart';
 import 'package:kgps_locator_kevinlima/models/waypoint.dart';
 import 'package:kgps_locator_kevinlima/widgets/compass.dart';
@@ -32,10 +37,16 @@ class HomePage extends StatefulWidget {
 
 class HomePageState extends State<HomePage> {
   // Dados fictícios para a Gaveta 2.
-  double latitude = -23.2048746;
-  double longitude = -46.1559800;
-  double altitude = 760.0;
-  double heading = 45.0;
+  double? latitude;
+  double? longitude;
+  double? altitude;
+  double heading = 0.0;
+
+  String gpsStatus = 'Aguardando GPS...';
+  String compassStatus = 'Aguardando bússola...';
+
+  StreamSubscription<Position>? gpsSubscription;
+  StreamSubscription<CompassEvent>? compassSubscription;
 
   Waypoint? navegandoPara;
 
@@ -72,6 +83,108 @@ class HomePageState extends State<HomePage> {
     debugPrint('Você acionou o excluir Waypoint ${waypoint.name}');
   }
 
+  void iniciarGPS() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          gpsStatus = 'Ative a localização do dispositivo.';
+        });
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        setState(() {
+          gpsStatus = 'Permissão de localização não concedida.';
+        });
+        return;
+      }
+
+      gpsSubscription =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 1,
+            ),
+          ).listen(
+            (Position position) {
+              if (!mounted) return;
+              setState(() {
+                latitude = position.latitude;
+                longitude = position.longitude;
+                altitude = position.altitude;
+                gpsStatus = 'GPS ativo';
+              });
+            },
+            onError: (Object error) {
+              if (!mounted) return;
+              setState(() {
+                gpsStatus = 'Erro ao obter localização.';
+              });
+              debugPrint('Erro GPS: $error');
+            },
+          );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        gpsStatus = 'Falha ao iniciar GPS.';
+      });
+      debugPrint('Falha GPS: $e');
+    }
+  }
+
+  void iniciarBussola() {
+    compassSubscription = FlutterCompass.events?.listen(
+      (CompassEvent event) {
+        if (!mounted) return;
+        if (event.heading == null) {
+          setState(() {
+            compassStatus = 'Sensor de bússola indisponível.';
+          });
+          return;
+        }
+
+        setState(() {
+          heading = event.heading!;
+          compassStatus = 'Bússola ativa';
+        });
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        setState(() {
+          compassStatus = 'Erro no sensor de bússola.';
+        });
+        debugPrint('Erro bússola: $error');
+      },
+    );
+
+    if (compassSubscription == null) {
+      setState(() {
+        compassStatus = 'Sensor de bússola indisponível.';
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    iniciarGPS();
+    iniciarBussola();
+  }
+
+  @override
+  void dispose() {
+    gpsSubscription?.cancel();
+    compassSubscription?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -83,7 +196,7 @@ class HomePageState extends State<HomePage> {
             Compass(heading: heading),
             const SizedBox(height: 8),
             Text(
-              'Heading: ${heading.toStringAsFixed(1)}°',
+              'Heading: ${heading ?? 0.0}°',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
@@ -121,13 +234,33 @@ class HomePageState extends State<HomePage> {
           padding: const EdgeInsets.all(12),
           child: Column(
             children: [
-              Text('Latitude: ${latitude.toStringAsFixed(6)}'),
-              Text('Longitude: ${longitude.toStringAsFixed(6)}'),
-              Text('Altitude: ${altitude.toStringAsFixed(1)} m'),
+              _infoRow(
+                'Latitude',
+                latitude != null ? latitude!.toStringAsFixed(6) : '--',
+              ),
+              _infoRow(
+                'Longitude',
+                longitude != null ? longitude!.toStringAsFixed(6) : '--',
+              ),
+              _infoRow(
+                'Altitude',
+                altitude != null ? '${altitude!.toStringAsFixed(1)} m' : '--',
+              ),
+              const SizedBox(height: 8),
+              Text(gpsStatus, style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 4),
+              Text(compassStatus, style: const TextStyle(fontSize: 14)),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [Text(label), Text(value)],
     );
   }
 
