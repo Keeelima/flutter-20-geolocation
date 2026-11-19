@@ -75,12 +75,108 @@ class HomePageState extends State<HomePage> {
     });
   }
 
-  void adicionarWaypoint() {
-    debugPrint('Você clicou no botão Add Waypoint');
+  Future<void> adicionarWaypoint() async {
+    // Verifica se o GPS já forneceu uma posição válida.
+    if (latitude == null || longitude == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aguardando posição GPS para cadastrar waypoint.'),
+        ),
+      );
+      return;
+    }
+
+    final formKey = GlobalKey<FormState>();
+    String nome = '';
+
+    // Abre o formulário e aguarda o nome informado.
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Novo Waypoint'),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            autofocus: true,
+            maxLength: 40,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Nome',
+              hintText: 'Ex.: Entrada principal',
+              border: OutlineInputBorder(),
+            ),
+            validator: (value) {
+              if (value == null || value.trim().isEmpty) {
+                return 'Informe o nome do waypoint.';
+              }
+              return null;
+            },
+            onSaved: (value) => nome = value!.trim(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? false) {
+                formKey.currentState?.save();
+                Navigator.pop(dialogContext, nome);
+              }
+            },
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+
+    // O usuário pode ter cancelado o diálogo.
+    if (name == null || !mounted) return;
+
+    // Captura a posição mais recente disponível.
+    final double? latitudeWaypoint = latitude;
+    final double? longitudeWaypoint = longitude;
+
+    if (latitudeWaypoint == null || longitudeWaypoint == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Posição GPS indisponível.')),
+      );
+      return;
+    }
+
+    final novoWaypoint = Waypoint(
+      name: name,
+      latitude: latitudeWaypoint,
+      longitude: longitudeWaypoint,
+    );
+
+    setState(() {
+      waypoints.add(novoWaypoint);
+    });
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Waypoint "$name" cadastrado.')));
   }
 
   void excluirWaypoint(Waypoint waypoint) {
-    debugPrint('Você acionou o excluir Waypoint ${waypoint.name}');
+    setState(() {
+      waypoints.remove(waypoint);
+
+      // Se o waypoint excluído estiver em navegação,
+      // encerra a navegação automaticamente.
+      if (identical(navegandoPara, waypoint)) {
+        navegandoPara = null;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Waypoint "${waypoint.name}" excluído.'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   void iniciarGPS() async {
